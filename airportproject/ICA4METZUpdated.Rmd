@@ -1,0 +1,166 @@
+---
+title: "ICA-4"
+author: "Ryan Metz"
+date: "2023-09-08"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(readr)
+SFO <- read_csv("2015_SFO_Customer_Survey.csv")
+
+```
+
+Part 1:
+
+Problem Set: Ordered Probit Methodology The San Francisco Airport is very concerned about customer satisfaction. Attached you will find a customer satisfaction survey for the SFO. Q7ALL is a categorical variable ranking the customer’s satisfaction from unacceptable to outstanding.
+
+a) Create a table summarizing the counts of the potential outcomes and report them as percentages.
+```{r}
+library(knitr)
+library(kableExtra)
+SFOR <-prop.table(table(SFO$Q7ALL[SFO$Q7ALL>0 & SFO$Q7ALL <6]))
+
+rownames(SFOR) <- c("Unacceptable","Needs Improvement","Meets Expectations","Exceeds Expectations","Outstanding")
+  
+kable(SFOR, col.names=c("SFO Rating","Proportion of Ratings"))
+
+```
+
+
+b) Review the available variables. Which variables capture customers characteristics?
+
+
+There are many variables for demographics starting from Q16 until the end in the variable definition list. We will only be using the following: Q18AGE, Q19GENDER, Q20INCOME, 21FLY, and LANG.
+
+c) Estimate an ordered probit model of overall satisfaction using customer characteristics as explanatory
+variables.
+
+
+```{r results='asis', message=FALSE, warning=FALSE}
+library(MASS)
+library(modelsummary)
+
+#Cleaning data
+SFOC <- SFO
+SFOC <- SFOC[!(SFOC$Q18AGE %in% c(0, 8) | SFOC$Q19GENDER %in% c(0, 3) | SFOC$Q20INCOME %in% c(0, 5) | SFOC$Q21FLY %in% c(0, 3)), ]
+
+m <- polr(factor(Q7ALL) ~ factor(Q18AGE) + factor(Q19GENDER) + factor(Q20INCOME) + factor(Q21FLY) + factor(LANG), data = SFOC, method ="probit", Hess=TRUE)
+
+
+
+library(stargazer)
+stargazer(m,type="html",covariate.labels = c("Unacceptable","Needs Improvement","Meets Expectations","Exceeds Expectations","Outstanding","18-24","25-34","35-44","45-54","55-64","65 and Over","Female","$50,000 - $100,000", "$100,001 - $150,000","Over $150,000","No","Spanish","Chinese","Japanese"), column.labels = c("Airport Rating"), dep.var.labels.include = FALSE)
+```
+
+_____________________________________________________________________________
+
+Part 2:
+
+Problem Set: BLP Methodology In this problem you will perform demand estimation using market level data. Run the following code in R
+
+```{r}
+library(BLPestimatoR)
+cdata <- data.frame(productData_cereal)
+```
+
+1. Find the market share of the outside good in every market. That is, sum all of the shares across all of the cereals for each market. You will notice that this number is less than 1. The market share of the outside option is equal to 1 - total cereal market share in each market. (Hint: you can use the aggregate to sum up the cereal shares by market)
+
+```{r}
+outside <- aggregate(cdata$share, by=list(cdata$cdid),FUN="sum")
+
+outside$x <- 1-outside$x
+  
+names(outside) <-c("cdid","s0")
+
+prod<- merge.data.frame(cdata,outside,by.x="cdid")
+
+
+```
+2. You can think of the market share as a limited dependent variable that is limited between zero and one. We showed that you can transform a multinomial logit probability into a linear equation using a transformation of the shares. Look in your notes to see how we can transform shares into a linear function of the X’s. Call this variable delta in your dataset.
+
+
+```{r}
+prod$y <- log(prod$share) - log(prod$s0)
+```
+
+3. Estimate the second stage regression of δj on Xj and pj in different ways:
+(a) OLS: estimate the relationship between the delta’s, price, and the product characteristics (sugar and mushy).
+
+```{r}
+library(modelsummary)
+reg1 <- lm(y ~ price + sugar + mushy, data = prod)
+
+modelsummary(list(reg1))
+```
+
+
+(b) OLS: Do the same as above, but estimate market fixed effects. Do your results change? If so how? What are the fixed effects capturing?
+
+```{r}
+library(lfe)
+reg2 <- felm(y ~ price + sugar + mushy | cdid, data = prod)
+modelsummary(list(reg1,reg2), title = "Base Model vs With Fixed Effects")
+```
+The results change slightly. The fixed effects are representing population preferences for each location or local government policy.
+
+(c) 2SLS: using the supplied instrumental variables estimate the equation you used in part b using IV.
+
+```{r results='asis', message=FALSE, warning=FALSE}
+library(AER)
+
+reg3 <- ivreg(y ~ price + sugar + mushy + factor(cdid) | sugar + mushy + factor(cdid) + IV1 + IV2 + IV3 + IV4 + IV5 + IV6 + IV7 + IV8 + IV9 + IV10 + IV11 + IV12 + IV13 + IV14 + IV15 + IV16 + IV17 + IV18 + IV19 + IV20, data = prod)
+
+modelsummary(list(reg3),coef_map = c("(Intercept)","price","sugar","mushy"), title = "With IV and Fixed Effects")
+
+```
+
+
+(d) 2SLS: perform the first stage F-stat test to judge the strength of your instruments
+
+```{r}
+reg4 <- lm(price ~ sugar + mushy + factor(cdid) + IV1 + IV2 + IV3 + IV4 + IV5 + IV6 + IV7 + IV8 + IV9 + IV10 + IV11 + IV12 + IV13 + IV14 + IV15 + IV16 + IV17 + IV18 + IV19 + IV20, data = prod)
+
+reg5 <-lm(price ~ sugar + mushy + factor(cdid), data = prod)
+anova(reg5,reg4)
+```
+
+
+(e) 2SLS: use the overidentification to see if you IV estimates are sensitive to the instruments you included.
+
+```{r}
+prod$resid <- reg3$residuals
+
+reg6 <- lm(resid ~ sugar + mushy + factor(cdid) + IV1 + IV2 + IV3 + IV4 + IV5 + IV6 + IV7 + IV8 + IV9 + IV10 + IV11 + IV12 + IV13 + IV14 + IV15 + IV16 + IV17 + IV18 + IV19 + IV20, data = prod)
+
+
+reg7 <- lm(resid ~ sugar + mushy + factor(cdid), data = prod)
+
+anova(reg6,reg7)
+```
+
+
+
+(f) 2SLS: can you use a smaller set of instruments to get a better result? If so, then what instruments did you include? Report your results including the first stage F-stats and the overidentification test.
+
+```{r}
+
+reg3 <- ivreg(y ~ price + sugar + mushy + factor(cdid) | sugar + mushy + factor(cdid) + IV1 + IV2 + IV3 + IV4 + IV8 + IV10 + IV11 + IV12 + IV13 + IV15 + IV16 + IV17 + IV19, data = prod)
+
+prod$resid <- reg3$residuals
+
+reg6 <- lm(resid ~ sugar + mushy + factor(cdid) + IV1 + IV2 + IV3 + IV4 + IV8 + IV10 + IV11 + IV12 + IV13 + IV15 + IV16 + IV17 + IV19, data = prod)
+
+anova(reg6,reg7)
+
+
+
+reg4 <- lm(price ~ sugar + mushy + factor(cdid) + IV1 + IV2 + IV3 + IV4 + IV8 + IV10 + IV11 + IV12 + IV13 + IV15 + IV16 + IV17 + IV19, data = prod)
+
+reg5 <-lm(price ~ sugar + mushy + factor(cdid), data = prod)
+anova(reg5,reg4)
+
+```
+After testing for overidentification and relevancy we included IV1 - IV4, IV8, IV10 - IV17, and IV19.
